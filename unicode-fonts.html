@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Unicode Font Converter</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --card: #ffffff;
+    --border: #e3e2de;
+    --text: #1a1a18;
+    --muted: #6b6a65;
+    --accent: #5b57d1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 32px 16px 80px;
+  }
+  .wrap {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  p.sub {
+    color: var(--muted);
+    margin: 0 0 24px;
+    font-size: 14px;
+  }
+  textarea {
+    width: 100%;
+    font-size: 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    resize: vertical;
+    min-height: 70px;
+    font-family: inherit;
+    background: var(--card);
+    color: var(--text);
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(91,87,209,0.15);
+  }
+  .results {
+    margin-top: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .row {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .row .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    min-width: 108px;
+    flex-shrink: 0;
+  }
+  .row .output {
+    flex: 1;
+    font-size: 17px;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+  .row button {
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .row button:hover {
+    background: var(--bg);
+    color: var(--text);
+  }
+  .row button.copied {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .empty {
+    color: var(--muted);
+    font-size: 14px;
+    padding: 20px 0;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Unicode font converter</h1>
+  <p class="sub">Type text below — see it instantly rendered in different Unicode character styles.</p>
+
+  <textarea id="input" placeholder="Type something..." autofocus></textarea>
+
+  <div class="results" id="results">
+    <div class="empty">Start typing above to see the styles</div>
+  </div>
+</div>
+
+<script>
+// Each style is a map built from base A-Z a-z 0-9 plus a target Unicode block start,
+// with irregular blocks (missing letters etc.) handled via explicit maps.
+
+const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const lower = "abcdefghijklmnopqrstuvwxyz";
+const digits = "0123456789";
+
+function buildMap(targetUpperStart, targetLowerStart, targetDigitStart) {
+  const map = {};
+  if (targetUpperStart !== null) {
+    for (let i = 0; i < upper.length; i++) map[upper[i]] = String.fromCodePoint(targetUpperStart + i);
+  }
+  if (targetLowerStart !== null) {
+    for (let i = 0; i < lower.length; i++) map[lower[i]] = String.fromCodePoint(targetLowerStart + i);
+  }
+  if (targetDigitStart !== null) {
+    for (let i = 0; i < digits.length; i++) map[digits[i]] = String.fromCodePoint(targetDigitStart + i);
+  }
+  return map;
+}
+
+// Mathematical Alphanumeric Symbols block covers most of these cleanly
+const styles = [
+  { label: "Bold",          map: buildMap(0x1D400, 0x1D41A, 0x1D7CE) },
+  { label: "Italic",        map: buildMap(0x1D434, 0x1D44E, null) },
+  { label: "Bold Italic",   map: buildMap(0x1D468, 0x1D482, null) },
+  { label: "Script",        map: buildMap(0x1D49C, 0x1D4B6, null) },
+  { label: "Bold Script",   map: buildMap(0x1D4D0, 0x1D4EA, null) },
+  { label: "Fraktur",       map: buildMap(0x1D504, 0x1D51E, null) },
+  { label: "Bold Fraktur",  map: buildMap(0x1D56C, 0x1D586, null) },
+  { label: "Double Struck", map: buildMap(0x1D538, 0x1D552, 0x1D7D8) },
+  { label: "Sans Serif",    map: buildMap(0x1D5A0, 0x1D5BA, 0x1D7E2) },
+  { label: "Sans Bold",     map: buildMap(0x1D5D4, 0x1D5EE, 0x1D7EC) },
+  { label: "Sans Italic",   map: buildMap(0x1D608, 0x1D622, null) },
+  { label: "Monospace",     map: buildMap(0x1D670, 0x1D68A, 0x1D7F6) },
+  { label: "Fullwidth",     map: buildMap(0xFF21, 0xFF41, 0xFF10) },
+  { label: "Circled",       map: buildMap(0x24B6, 0x24D0, null) }, // digits handled below
+  { label: "Small Caps",    map: buildSmallCaps() },
+  { label: "Upside Down",   map: buildUpsideDown() },
+];
+
+// Circled digits: 0 has no standard circled form in that block; use 0x24EA for 0, then 0x2460-series for 1-9 (circled numbers, not letters block)
+styles.find(s => s.label === "Circled").map["0"] = "\u24EA";
+for (let i = 1; i <= 9; i++) styles.find(s => s.label === "Circled").map[String(i)] = String.fromCodePoint(0x2460 + (i - 1));
+
+function buildSmallCaps() {
+  const specialUpperFallback = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"; // capitals stay as-is
+  const smallCapsLower = "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘQʀꜱᴛᴜᴠᴡxʏᴢ".split("");
+  // Note: some letters (Q, X) lack true small-cap glyphs in common fonts; using closest available or fallback.
+  const fixedLower = ["ᴀ","ʙ","ᴄ","ᴅ","ᴇ","ꜰ","ɢ","ʜ","ɪ","ᴊ","ᴋ","ʟ","ᴍ","ɴ","ᴏ","ᴘ","ǫ","ʀ","s","ᴛ","ᴜ","ᴠ","ᴡ","x","ʏ","ᴢ"];
+  const map = {};
+  for (let i = 0; i < upper.length; i++) map[upper[i]] = specialUpperFallback[i];
+  for (let i = 0; i < lower.length; i++) map[lower[i]] = fixedLower[i];
+  return map;
+}
+
+function buildUpsideDown() {
+  const upperFlip = {A:"∀",B:"𐐒",C:"Ɔ",D:"ᗡ",E:"Ǝ",F:"Ⅎ",G:"⅁",H:"H",I:"I",J:"ſ",K:"ʞ",L:"⅂",M:"W",N:"N",O:"O",P:"Ԁ",Q:"Ό",R:"ᴚ",S:"S",T:"ꓕ",U:"∩",V:"Λ",W:"M",X:"X",Y:"⅄",Z:"Z"};
+  const lowerFlip = {a:"ɐ",b:"q",c:"ɔ",d:"p",e:"ǝ",f:"ɟ",g:"ƃ",h:"ɥ",i:"ᴉ",j:"ɾ",k:"ʞ",l:"l",m:"ɯ",n:"u",o:"o",p:"d",q:"b",r:"ɹ",s:"s",t:"ʇ",u:"n",v:"ʌ",w:"ʍ",x:"x",y:"ʎ",z:"z"};
+  const digitFlip = {0:"0",1:"Ɩ",2:"ᄅ",3:"Ɛ",4:"ㄣ",5:"ϛ",6:"9",7:"ㄥ",8:"8",9:"6"};
+  return { ...upperFlip, ...lowerFlip, ...digitFlip };
+}
+
+function convert(text, map) {
+  let out = "";
+  for (const ch of text) {
+    out += map[ch] !== undefined ? map[ch] : ch;
+  }
+  return out;
+}
+
+function render() {
+  const text = document.getElementById("input").value;
+  const container = document.getElementById("results");
+  container.innerHTML = "";
+
+  if (!text.trim()) {
+    container.innerHTML = '<div class="empty">Start typing above to see the styles</div>';
+    return;
+  }
+
+  // Upside down also reverses character order for the flip effect
+  styles.forEach(style => {
+    let converted = convert(text, style.map);
+    if (style.label === "Upside Down") {
+      converted = converted.split("").reverse().join("");
+    }
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `
+      <div class="label">${style.label}</div>
+      <div class="output">${converted}</div>
+      <button data-text="${encodeURIComponent(converted)}">Copy</button>
+    `;
+    container.appendChild(row);
+  });
+}
+
+document.getElementById("input").addEventListener("input", render);
+
+document.getElementById("results").addEventListener("click", (e) => {
+  if (e.target.tagName === "BUTTON") {
+    const text = decodeURIComponent(e.target.getAttribute("data-text"));
+    navigator.clipboard.writeText(text).then(() => {
+      e.target.textContent = "Copied";
+      e.target.classList.add("copied");
+      setTimeout(() => {
+        e.target.textContent = "Copy";
+        e.target.classList.remove("copied");
+      }, 1200);
+    });
+  }
+});
+</script>
+</body>
+</html>
